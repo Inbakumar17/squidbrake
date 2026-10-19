@@ -12,7 +12,7 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/batrapulkit/squidbrake/badge)](https://scorecard.dev/viewer/?uri=github.com/batrapulkit/squidbrake)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](requirements.txt)
 [![MCP](https://img.shields.io/badge/MCP-compatible-8A2BE2.svg)](docs/install.md#2-connect-real-agents)
-[![Real incidents replayed: 13 of 14 stopped](https://img.shields.io/badge/real%20incidents%20replayed-13%20of%2014%20stopped-yellow.svg)](incidents/)
+[![Real incidents replayed: 13 of 15 stopped](https://img.shields.io/badge/real%20incidents%20replayed-13%20of%2015%20stopped-yellow.svg)](incidents/)
 [![Good first issues](https://img.shields.io/github/issues/batrapulkit/squidbrake/good%20first%20issue?label=good%20first%20issues&color=7057ff)](https://github.com/batrapulkit/squidbrake/labels/good%20first%20issue)
 
 <a href="https://www.producthunt.com/products/squidbrake?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-squidbrake" target="_blank" rel="noopener noreferrer"><img alt="Squidbrake - Change control for AI agents: sign-off, undo and a record | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1275992&theme=light&t=1791704247916"></a>
@@ -27,7 +27,7 @@ sits between the agents and those actions:
 Every decision goes into a tamper-evident record that someone outside engineering can read.
 
 One policy covers every agent your company runs: Claude Code, Cursor, Codex, Gemini CLI, VS Code Copilot,
-Antigravity, and any MCP tool. Open source (Apache 2.0) and free for one person; more than one person, phone approvals, Slack/Teams/email and the audit export are part of the Team plan (`squidbrake license`). Runs on your laptop or your own server.
+Antigravity, and any MCP tool. Free and open source (Apache 2.0). Runs on your laptop or your own server.
 
 ![Demo: every agent action goes on the record; a refund waits for a person and is approved from a phone; the record shows who asked, who approved and what led to it](https://raw.githubusercontent.com/batrapulkit/squidbrake/main/docs/demo.gif)
 
@@ -161,13 +161,14 @@ sequences:
 
 The incidents and the session benchmark run in CI, so they can't quietly stop being true.
 
-- **Real incidents:** [incidents/](incidents/) replays 11 public AI-agent incidents against the shipped rules.
+- **Real incidents:** [incidents/](incidents/) replays 12 public AI-agent incidents against the shipped rules.
   - Examples: Replit's production database, the Railway volume deletion, GitHub MCP, Supabase MCP, CurXecute.
-  - **13 of 14 harmful actions are stopped.**
+  - **13 of 15 harmful actions are stopped.**
 - **Reported bypasses:** every way around Squidbrake that someone sent us is a test that must stay stopped on
   every release ([tests/test_reported_bypasses.py](tests/test_reported_bypasses.py)): **20 of 20 stopped**, and
   the everyday variants of each still run.
-  - The one not stopped is listed and explained: a malicious MCP server adds a BCC inside itself, after the check.
+  - The two incidents not stopped are listed and explained: a malicious MCP server adds a BCC inside itself, after
+    the check, and Copilot's edit to `.vscode/settings.json`, which the setup rule doesn't cover.
 - **Whole sessions:** in [bench/chains/](bench/chains/), Squidbrake stops 64 of 65 harmful steps and holds 3 of 41
   routine ones. An allowlist stops 53 and holds 10.
 - **Other tools:** [bench/compare/](bench/compare/) runs the same steps through two other tools (dcg and Microsoft's
@@ -218,11 +219,6 @@ is not a sandbox against an agent deliberately trying to escape.
 
 - **It doesn't see** code running inside an allowed program or an MCP server, a background process started earlier,
   a tool that isn't connected, or someone with admin rights on the machine.
-- **When the agent and Squidbrake run as the same OS user,** a program the agent was allowed to run can read
-  whatever that user can. Squidbrake finds its keys by real path (symlinks, globs and `cd` followed). It alerts within
-  seconds if a key file changes, and approvals come only from the dashboard, a phone or Slack. To close the gap
-  fully, run the gateway as another user or on a server, so the agent's computer only ever holds a key that can ask
-  and never approve. Details: [THREAT_MODEL.md](THREAT_MODEL.md#when-the-agent-and-squidbrake-run-as-the-same-user).
 - **It doesn't make an over-privileged agent safe.** Use it with least-privilege credentials, and a container or VM
   for untrusted work.
 - **While the gateway is down** (`when_unreachable: block_risky`, the default):
@@ -248,8 +244,7 @@ Anonymous usage **counts** are sent to the Squidbrake team:
 - the decision time
 - for each hold or block, only the program (like `rm`) and the rule
 
-The first run in a terminal says so, and asks, optionally, for your work email and name (Enter skips it; only if you
-give an email are it, your name and the names of the coding agents installed here sent). `squidbrake telemetry status` shows exactly what is sent, and `DO_NOT_TRACK=1`
+The first run in a terminal says so. `squidbrake telemetry status` shows exactly what is sent, and `DO_NOT_TRACK=1`
 turns it off. Details: [docs/operations.md](docs/operations.md#usage-sharing).
 
 ## Documentation
