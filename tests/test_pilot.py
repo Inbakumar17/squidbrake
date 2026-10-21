@@ -548,8 +548,72 @@ def test_team_plan_signup_is_a_hosted_trial_waiting_for_approval(insights, monke
                                           "setup": "local", "plan": "team", "source": "invite"}).json()
     page = insights.get(urlparse(r["link"]).path).text
     assert '"hosted": true' in page and '"state": "waiting"' in page and '"plan": "team"' in page
-    assert '"checkout": "https://pay.example/team"' in page and '"trial_ends": "20' in page
+    assert '"checkout": "https://pay.example/team?client_reference_id=' in page and '"trial_ends": "20' in page
     p = next(p for p in insights.get("/v1/admin/overview", headers={"X-Admin-Key": "admin-test-key"}).json()["pilots"]
              if p.get("email") == "ivy@trial.dev")
     assert "from invite" in p["note"] and p["plan"] == "team"
     assert insights.post("/v1/signup", json={"name": "x", "email": "x@t.dev", "company": "x", "plan": "gold"}).status_code == 422
+
+
+def test_stripe_payments_reach_the_pilot_they_were_for(insights, monkeypatch):
+    import hashlib
+    import hmac as _hmac
+    import time as _time
+    import app as insights_app
+    insights_app._requests.clear()
+    told = []
+    monkeypatch.setattr(insights_app, "notify", told.append)
+    monkeypatch.setattr(insights_app, "STRIPE_SECRET", "whsec_test")
+    admin = {"X-Admin-Key": "admin-test-key"}
+    code = insights.post("/v1/signup", json={"name": "Pia", "email": "pia@paying.dev", "company": "PayCo"}).json()["link"].rsplit("/", 1)[1]
+    pilot = lambda: next(p for p in insights.get("/v1/admin/overview", headers=admin).json()["pilots"] if p["code"] == code)
+
+    def send(event, secret="whsec_test", t=None):
+        body = json.dumps(event).encode()
+        t = int(t or _time.time())
+        sig = _hmac.new(secret.encode(), f"{t}.".encode() + body, hashlib.sha256).hexdigest()
+        return insights.post("/v1/stripe/webhook", content=body, headers={"Stripe-Signature": f"t={t},v1={sig}"})
+
+    paid_pilot = {"type": "checkout.session.completed", "data": {"object": {
+        "mode": "payment", "amount_total": 99900, "client_reference_id": code, "customer": "cus_1"}}}
+    assert send(paid_pilot, secret="wrong").status_code == 400                       # not from Stripe
+    assert send(paid_pilot, t=_time.time() - 3600).status_code == 400                # replayed later
+    assert send(paid_pilot).status_code == 200
+    assert pilot()["paid_once"] == 999 and pilot()["mrr"] == 0 and "PayCo paid $999 (one-time)" in told[-1]
+    team = {"type": "checkout.session.completed", "data": {"object": {                 # matched by email, no code
+        "mode": "subscription", "amount_total": 49900, "customer": "cus_1", "customer_details": {"email": "PIA@paying.dev"}}}}
+    send(team)
+    assert pilot()["mrr"] == 499 and pilot()["paying_since"] and "/month" in told[-1]
+    send({"type": "customer.subscription.deleted", "data": {"object": {"customer": "cus_1"}}})
+    assert pilot()["mrr"] == 0 and "cancelled" in told[-1]
+    assert insights_app.checkout_link("https://buy.stripe.com/x", code, "a@b.c") == \
+        f"https://buy.stripe.com/x?client_reference_id={code}&prefilled_email=a%40b.c"
+
+
+def test_a_call_booked_on_calendly_is_saved_and_sent_once(insights, monkeypatch):
+    import app as insights_app
+    insights_app._requests.clear()
+    told = []
+    monkeypatch.setattr(insights_app, "notify", told.append)
+    admin = {"X-Admin-Key": "admin-test-key"}
+    import time
+    inv = f"https://api.calendly.com/scheduled_events/E1/invitees/I-{time.time_ns()}"
+    assert insights.post("/v1/booking", json={"invitee": "https://evil.example/x"}).status_code == 422
+    body = {"event": "https://api.calendly.com/scheduled_events/E1", "invitee": inv, "page": "/",
+            "name": "Ola", "email": "ola@typed.dev", "company": "OlaCo"}
+    assert insights.post("/v1/booking", json=body).status_code == 200                 # no token: what the page had
+    assert insights.post("/v1/booking", json=body).status_code == 200                 # sent twice: one row
+    rows = [r for r in insights.get("/v1/admin/team-requests", headers=admin).json() if r["source"] == "calendly"]
+    assert len([r for r in rows if r["email"] == "ola@typed.dev"]) == 1 and len(told) == 1 and "Ola" in told[0]
+    # with a token, Calendly's own name, email and time
+    monkeypatch.setattr(insights_app, "CALENDLY_TOKEN", "t")
+    monkeypatch.setattr(insights_app, "calendly_get", lambda uri: {"name": "Real Name", "email": "Real@Calendly.dev"}
+                        if "invitees" in uri else {"start_time": "2026-10-22T09:30:00.000000Z"})
+    insights_app._requests.clear()
+    insights.post("/v1/booking", json=body | {"invitee": inv + "-2"})
+    assert "Real Name (real@calendly.dev)" in told[-1] and "2026-10-22 09:30 UTC" in told[-1]
+
+    def unknown(uri):
+        raise RuntimeError("404")
+    monkeypatch.setattr(insights_app, "calendly_get", unknown)
+    assert insights.post("/v1/booking", json=body | {"invitee": inv + "-3"}).status_code == 422   # made up
